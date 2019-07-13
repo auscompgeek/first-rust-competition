@@ -5,13 +5,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Pulse width modulation output.
+
 use wpilib_sys::usage::{instances, resource_types};
 use wpilib_sys::*;
-
-/// Check if a PWM channel is valid.
-fn check_pwm_channel(channel: i32) -> bool {
-    unsafe { HAL_CheckPWMChannel(channel) != 0 }
-}
 
 /// Represents the amount to multiply the minimum servo-pulse pwm period by.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -35,10 +32,6 @@ pub type PWM = Pwm;
 
 impl Pwm {
     pub fn new(channel: i32) -> HalResult<Self> {
-        if !check_pwm_channel(channel) {
-            return Err(HalError(0));
-        }
-
         let handle = hal_call!(HAL_InitializePWMPort(HAL_GetPort(channel)))?;
         let mut pwm = Pwm { channel, handle };
 
@@ -50,12 +43,15 @@ impl Pwm {
         Ok(pwm)
     }
 
-    /// Set the PWM value directly to the hardware.
+    /// Sets the PWM channel to the desired value.
+    ///
+    /// The values are in raw FPGA units,
+    /// and have the potential to change with any FPGA release.
     pub fn set_raw(&mut self, value: i32) -> HalResult<()> {
         hal_call!(HAL_SetPWMRaw(self.handle, value))
     }
 
-    /// Get the PWM value directly from the hardware.
+    /// Gets the currently set value, in raw FPGA units.
     pub fn raw(&self) -> HalResult<i32> {
         hal_call!(HAL_GetPWMRaw(self.handle))
     }
@@ -90,7 +86,7 @@ impl Pwm {
         hal_call!(HAL_SetPWMPeriodScale(self.handle, mult as i32))
     }
 
-    /// Honestly, I have no idea what this does and it isn't documented in wpilib.
+    /// Forces the PWM signal to go to 0 temporarily.
     pub fn set_zero_latch(&mut self) -> HalResult<()> {
         hal_call!(HAL_LatchPWMZero(self.handle))
     }
@@ -99,13 +95,16 @@ impl Pwm {
     pub fn enable_deadband_elimination(&mut self, eliminate_deadband: bool) -> HalResult<()> {
         hal_call!(HAL_SetPWMEliminateDeadband(
             self.handle,
-            eliminate_deadband as i32
+            eliminate_deadband as HAL_Bool,
         ))
     }
 
-    /// Set the bounds on the PWM pulse widths. This sets the bounds on the PWM values for a
-    /// particular type of controller. The values determine the upper and lower speeds as well as
-    /// the deadband bracket.
+    /// Set the bounds on the PWM pulse widths.
+    ///
+    /// This sets the bounds on the PWM values for a particular type of controller.
+    /// The values determine the upper and lower speeds as well as the deadband bracket.
+    ///
+    /// All values are in milliseconds.
     pub fn set_bounds(
         &mut self,
         max: f64,
@@ -124,9 +123,16 @@ impl Pwm {
         ))
     }
 
-    /// Set the bounds on the PWM values. This sets the bounds on the PWM values for a particular
-    /// each type of controller. The values determine the upper and lower speeds as well as the
-    /// deadband bracket.
+    /// Set the raw bounds on the PWM pulse widths.
+    ///
+    /// It is recommended to use [`set_bounds`] instead.
+    ///
+    /// This sets the bounds on the PWM values for a particular type of controller.
+    /// The values determine the upper and lower speeds as well as the deadband bracket.
+    ///
+    /// Values are in raw FPGA units.
+    ///
+    /// [`set_bounds`]: #method.set_bounds
     pub fn set_raw_bounds(
         &mut self,
         max: i32,
@@ -145,9 +151,8 @@ impl Pwm {
         ))
     }
 
-    /// Get the bounds on the PWM values. This Gets the bounds on the PWM values for a particular
-    /// each type of controller. The values determine the upper and lower speeds as well as the
-    /// deadband bracket.
+    /// Gets the raw PWM configuration settings for this channel.
+    /// Values are in raw FPGA units.
     pub fn raw_bounds(
         &self,
         max: &mut i32,
@@ -174,8 +179,8 @@ impl Pwm {
 
 impl Drop for Pwm {
     fn drop(&mut self) {
-        hal_call!(HAL_SetPWMDisabled(self.handle)).ok();
-        hal_call!(HAL_FreePWMPort(self.handle)).ok();
+        let _ = self.set_disabled();
+        let _ = hal_call!(HAL_FreePWMPort(self.handle));
     }
 }
 
@@ -249,14 +254,13 @@ impl PwmSpeedController {
         Self::new_common(channel, usage::resource_types::PWMVictorSPX)
     }
 
-    /// Set the PWM value. The PWM value is set using a range of -1.0 to 1.0, appropriately scaling
-    /// the value for the FPGA.
+    /// Sets the speed. The speed should be within the interval -1.0 to 1.0.
     pub fn set(&mut self, speed: f64) -> HalResult<()> {
         self.pwm
             .set_speed(if self.inverted { -speed } else { speed })
     }
 
-    /// Get the recently set value of the PWM.
+    /// Gets the last set speed.
     pub fn get(&self) -> HalResult<f64> {
         if self.inverted {
             Ok(-self.pwm.speed()?)
@@ -265,12 +269,12 @@ impl PwmSpeedController {
         }
     }
 
-    /// Sets if the provided speed is inverted by default when calling set.
+    /// Sets whether the speed controller is inverted.
     pub fn set_inverted(&mut self, inverted: bool) {
         self.inverted = inverted;
     }
 
-    /// Gets if the PWM is being inverted.
+    /// Gets whether the speed controller is inverted.
     pub fn inverted(&self) -> bool {
         self.inverted
     }
