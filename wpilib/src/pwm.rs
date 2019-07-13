@@ -25,26 +25,29 @@ pub enum PeriodMultiplier {
 }
 
 #[derive(Debug)]
-pub struct PWM {
+/// A PWM output pin.
+pub struct Pwm {
     channel: i32,
     handle: HAL_DigitalHandle,
 }
+#[deprecated(since = "0.5.0", note = "renamed to Pwm")]
+pub type PWM = Pwm;
 
-impl PWM {
-    #[allow(clippy::new_ret_no_self)]
+impl Pwm {
     pub fn new(channel: i32) -> HalResult<Self> {
         if !check_pwm_channel(channel) {
             return Err(HalError(0));
         }
 
         let handle = hal_call!(HAL_InitializePWMPort(HAL_GetPort(channel)))?;
+        let mut pwm = Pwm { channel, handle };
 
-        hal_call!(HAL_SetPWMDisabled(handle))?;
-        hal_call!(HAL_SetPWMEliminateDeadband(handle, false as i32))?;
+        pwm.set_disabled()?;
+        pwm.enable_deadband_elimination(false)?;
 
         usage::report(resource_types::PWM, channel as instances::Type);
 
-        Ok(PWM { channel, handle })
+        Ok(pwm)
     }
 
     /// Set the PWM value directly to the hardware.
@@ -169,7 +172,7 @@ impl PWM {
     }
 }
 
-impl Drop for PWM {
+impl Drop for Pwm {
     fn drop(&mut self) {
         hal_call!(HAL_SetPWMDisabled(self.handle)).ok();
         hal_call!(HAL_FreePWMPort(self.handle)).ok();
@@ -177,13 +180,17 @@ impl Drop for PWM {
 }
 
 #[derive(Debug)]
+/// A PWM motor controller.
 pub struct PwmSpeedController {
-    pwm: PWM,
+    pwm: Pwm,
     inverted: bool,
 }
 
 impl PwmSpeedController {
-    pub fn new(pwm: PWM) -> Self {
+    /// Creates a PwmSpeedController from a Pwm without configuring it.
+    ///
+    /// This is useful if you need to calibrate the PWM bounds.
+    pub fn new(pwm: Pwm) -> Self {
         PwmSpeedController {
             pwm,
             inverted: false,
@@ -192,7 +199,7 @@ impl PwmSpeedController {
 
     /// Creates a PwmMotorController which is configured as a talonSRX
     pub fn new_talon(channel: i32) -> HalResult<PwmSpeedController> {
-        let mut pwm = PWM::new(channel)?;
+        let mut pwm = Pwm::new(channel)?;
         pwm.set_bounds(2.004, 1.52, 1.5, 1.48, 0.997)?;
         pwm.set_period_multiplier(PeriodMultiplier::Multiplier1x)?;
         pwm.set_speed(0.0)?;
