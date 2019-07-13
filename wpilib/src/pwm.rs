@@ -179,6 +179,14 @@ impl Drop for Pwm {
     }
 }
 
+/// Initialises a PWM for use as a speed controller.
+/// Assumes the bounds have been set.
+fn init_speed_controller(pwm: &mut Pwm) -> HalResult<()> {
+    pwm.set_period_multiplier(PeriodMultiplier::Multiplier1x)?;
+    pwm.set_speed(0.0)?;
+    pwm.set_zero_latch()
+}
+
 #[derive(Debug)]
 /// A PWM motor controller.
 pub struct PwmSpeedController {
@@ -197,15 +205,48 @@ impl PwmSpeedController {
         }
     }
 
-    /// Creates a PwmMotorController which is configured as a talonSRX
-    pub fn new_talon(channel: i32) -> HalResult<PwmSpeedController> {
+    /// Creates a new PWM Talon SRX, Victor SPX, Victor SP, or DMC 60.
+    fn new_common(channel: i32, resource: usage::resource_types::Type) -> HalResult<Self> {
         let mut pwm = Pwm::new(channel)?;
+
+        /*
+         * Note that the above use the following bounds for PWM values. These
+         * values should work reasonably well for most controllers, but if users
+         * experience issues such as asymmetric behavior around the deadband or
+         * inability to saturate the controller in either direction, calibration
+         * is recommended. Refer to the manufacturer's user manual for details.
+         *
+         *   2.004ms = full "forward"
+         *   1.52ms = the "high end" of the deadband range
+         *   1.50ms = center of the deadband range (off)
+         *   1.48ms = the "low end" of the deadband range
+         *   0.997ms = full "reverse"
+         */
         pwm.set_bounds(2.004, 1.52, 1.5, 1.48, 0.997)?;
-        pwm.set_period_multiplier(PeriodMultiplier::Multiplier1x)?;
-        pwm.set_speed(0.0)?;
-        pwm.set_zero_latch()?;
-        usage::report(resource_types::PWMTalonSRX, channel as instances::Type);
-        Ok(PwmSpeedController::new(pwm))
+
+        init_speed_controller(&mut pwm)?;
+        usage::report(resource, channel as _);
+        Ok(Self::new(pwm))
+    }
+
+    /// Creates a Digilent DMC 60.
+    pub fn new_dmc60(channel: i32) -> HalResult<Self> {
+        Self::new_common(channel, usage::resource_types::DigilentDMC60)
+    }
+
+    /// Creates a CTRE Talon SRX over PWM.
+    pub fn new_talon_srx(channel: i32) -> HalResult<Self> {
+        Self::new_common(channel, usage::resource_types::PWMTalonSRX)
+    }
+
+    /// Creates a Vex Victor SP.
+    pub fn new_victor_sp(channel: i32) -> HalResult<Self> {
+        Self::new_common(channel, usage::resource_types::VictorSP)
+    }
+
+    /// Creates a CTRE Victor SPX over PWM.
+    pub fn new_victor_spx(channel: i32) -> HalResult<Self> {
+        Self::new_common(channel, usage::resource_types::PWMVictorSPX)
     }
 
     /// Set the PWM value. The PWM value is set using a range of -1.0 to 1.0, appropriately scaling
