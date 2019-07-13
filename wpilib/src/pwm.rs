@@ -280,3 +280,61 @@ impl PwmSpeedController {
         self.pwm.set_disabled()
     }
 }
+
+#[derive(Debug)]
+/**
+ * Standard hobby style servo.
+ *
+ * The range parameters default to the appropriate values for the Hitec HS-322HD
+ * servo provided in the FIRST Kit of Parts in 2008.
+ */
+pub struct Servo(Pwm);
+
+impl Servo {
+    pub const MAX_ANGLE: f64 = 180.0;
+    pub const MIN_ANGLE: f64 = 0.0;
+    const ANGLE_RANGE: f64 = Self::MAX_ANGLE - Self::MIN_ANGLE;
+
+    pub const DEFAULT_MAX_PWM: f64 = 2.4;
+    pub const DEFAULT_MIN_PWM: f64 = 0.6;
+
+    /// Creates a Hitec HS-322HD servo on the specified PWM channel.
+    pub fn new(channel: i32) -> HalResult<Self> {
+        Self::with_bounds(channel, Self::DEFAULT_MAX_PWM, Self::DEFAULT_MIN_PWM)
+    }
+
+    fn with_bounds(channel: i32, max: f64, min: f64) -> HalResult<Self> {
+        let mut pwm = Pwm::new(channel)?;
+
+        pwm.set_bounds(max, 0.0, 0.0, 0.0, min)?;
+        pwm.set_period_multiplier(PeriodMultiplier::Multiplier4x)?;
+
+        usage::report(usage::resource_types::Servo, channel as _);
+        Ok(Self(pwm))
+    }
+
+    /// Creates a Servo from a Pwm without configuring it.
+    pub fn from_pwm(pwm: Pwm) -> Self {
+        Self(pwm)
+    }
+
+    /// Set the servo position. Servo values range from 0.0 to 1.0.
+    pub fn set(&mut self, value: f64) -> HalResult<()> {
+        self.0.set_position(value)
+    }
+
+    pub fn get(&self) -> HalResult<f64> {
+        self.0.position()
+    }
+
+    pub fn set_angle(&mut self, degrees: f64) -> HalResult<()> {
+        self.set(
+            (degrees.max(Self::MIN_ANGLE).min(Self::MAX_ANGLE) - Self::MIN_ANGLE)
+                / Self::ANGLE_RANGE,
+        )
+    }
+
+    pub fn angle(&self) -> HalResult<f64> {
+        Ok(self.get()? * Self::ANGLE_RANGE + Self::MIN_ANGLE)
+    }
+}
